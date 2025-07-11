@@ -4,7 +4,6 @@ import os, subprocess, time, json, zipfile, requests, threading
 from datetime import datetime, timedelta, timezone as dt_timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from pytz import timezone
-from flask import Flask
 
 BOT_TOKEN = "7694418942:AAExss6WeT5Q4EIZLWlidt4JVuLT8fIRS5s"
 ADMIN_ID = 7107162691
@@ -46,28 +45,26 @@ def is_premium(uid):
     return True
 
 def stop_project(uid, filename, bot=None):
-    process = user_projects.get(uid, {}).get(filename)
-    if process:
-        process.kill()
+    proc = user_projects.get(uid, {}).get(filename)
+    if proc:
+        proc.kill()
         user_projects[uid].pop(filename, None)
         if bot:
             bot.send_message(chat_id=uid, text=f"💤 Project <b>{filename}</b> auto-terminated.", parse_mode="HTML")
 
 def run_command(uid, command, display_name, update, context):
     logpath = os.path.join(LOG_DIR, f"{uid}_{display_name}.txt")
-
     def execute():
         with open(logpath, "w") as log_file:
-            process = subprocess.Popen(command, shell=True, stdout=log_file, stderr=subprocess.STDOUT)
+            proc = subprocess.Popen(command, shell=True, stdout=log_file, stderr=subprocess.STDOUT)
             user_projects.setdefault(uid, {})
-            user_projects[uid][display_name] = process
+            user_projects[uid][display_name] = proc
 
             if not is_premium(uid):
                 scheduler.add_job(stop_project, 'date',
                     run_date=datetime.now(dt_timezone.utc) + timedelta(minutes=10),
                     args=[uid, display_name, context.bot]
                 )
-
     threading.Thread(target=execute).start()
 
     update.effective_message.reply_text(
@@ -131,15 +128,14 @@ def button_handler(update: Update, context: CallbackContext):
         if uid != ADMIN_ID:
             return query.answer("❌ Only admin can use this.")
         for uid_projects in user_projects.values():
-            for process in uid_projects.values():
-                process.kill()
+            for proc in uid_projects.values():
+                proc.kill()
         user_projects.clear()
         query.message.reply_text("🧨 All sessions terminated by admin.")
     elif data == "my_plan":
         now = datetime.now(timezone("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S")
         expiry = premium_users.get(str(uid))
         project_count = len(user_projects.get(uid, {}))
-
         if expiry:
             text = f"""🌟 <b>PREMIUM PLAN ACTIVE</b>
 <b>User ID:</b> <code>{uid}</code>
@@ -173,12 +169,10 @@ def button_handler(update: Update, context: CallbackContext):
 def handle_file(update: Update, context: CallbackContext):
     file = update.message.document
     uid = update.effective_user.id
-
     if not file.file_name.endswith(".py"):
         return update.message.reply_text("❌ Send a valid .py file only.")
     if file.file_size > MAX_FILE_SIZE:
         return update.message.reply_text("❌ File too large. Max 50MB allowed.")
-
     filename = file.file_name
     path = os.path.join(BASE_DIR, filename)
     file.get_file().download(path)
