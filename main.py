@@ -6,13 +6,13 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from pytz import timezone
 from flask import Flask
 
-BOT_TOKEN = "7659870883:AAGiG3ActkFCD2LmQ8l1b63_CJrPs-c7Ld0"
+BOT_TOKEN = "7694418942:AAExss6WeT5Q4EIZLWlidt4JVuLT8fIRS5s"
 ADMIN_ID = 7107162691
 
 BASE_DIR = "projects"
 LOG_DIR = "logs"
 PREMIUM_FILE = "premium.json"
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -45,48 +45,49 @@ def is_premium(uid):
         return False
     return True
 
-def run_command(uid, command, display_name, update, context):
-    session_id = f"{uid}_{display_name}".replace(" ", "_")
-    logpath = os.path.join(LOG_DIR, f"{session_id}.txt")
+def stop_project(uid, filename, bot=None):
+    process = user_projects.get(uid, {}).get(filename)
+    if process:
+        process.kill()
+        user_projects[uid].pop(filename, None)
+        if bot:
+            bot.send_message(chat_id=uid, text=f"💤 Project <b>{filename}</b> auto-terminated.", parse_mode="HTML")
 
-    # Start new subprocess
-    def run():
+def run_command(uid, command, display_name, update, context):
+    logpath = os.path.join(LOG_DIR, f"{uid}_{display_name}.txt")
+
+    def execute():
         with open(logpath, "w") as log_file:
             process = subprocess.Popen(command, shell=True, stdout=log_file, stderr=subprocess.STDOUT)
             user_projects.setdefault(uid, {})
             user_projects[uid][display_name] = process
 
             if not is_premium(uid):
-                scheduler.add_job(stop_project, 'date', run_date=datetime.now(dt_timezone.utc) + timedelta(minutes=10),
-                                  args=[uid, display_name, context.bot])
+                scheduler.add_job(stop_project, 'date',
+                    run_date=datetime.now(dt_timezone.utc) + timedelta(minutes=10),
+                    args=[uid, display_name, context.bot]
+                )
 
-    threading.Thread(target=run).start()
+    threading.Thread(target=execute).start()
 
     update.effective_message.reply_text(
         f"✅ Project <b>{display_name}</b> started.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("🛑 Stop", callback_data=f"terminate_{display_name}")],
+            [InlineKeyboardButton("🔁 Restart", callback_data=f"restart_{display_name}")],
             [InlineKeyboardButton("📜 Log", callback_data=f"log_{display_name}")]
         ])
     )
 
-def stop_project(uid, filename, bot=None):
-    project = user_projects.get(uid, {}).get(filename)
-    if project:
-        project.kill()
-        user_projects[uid].pop(filename, None)
-        if bot:
-            bot.send_message(chat_id=uid, text=f"💤 Project <b>{filename}</b> auto-terminated.", parse_mode="HTML")
-
 def start(update: Update, context: CallbackContext):
-    user = update.effective_user
-    uid = user.id
-    name = user.first_name
+    uid = update.effective_user.id
+    name = update.effective_user.first_name
     image = "https://files.catbox.moe/efem5j.jpg"
     keyboard = [
         [InlineKeyboardButton("🐍 Host Python File", callback_data="host_py")],
         [InlineKeyboardButton("📁 My Projects", callback_data="my_projects")],
+        [InlineKeyboardButton("🛠 Terminal a Project", callback_data="terminate_one")],
         [InlineKeyboardButton("⛔ Terminate All", callback_data="terminate_all")],
         [InlineKeyboardButton("📜 My Plan", callback_data="my_plan")],
         [InlineKeyboardButton("🧬 Deploy GitHub URL", callback_data="deploy_github")],
@@ -101,8 +102,7 @@ def start(update: Update, context: CallbackContext):
 📜 Smart Logs | 🧠 Auto Command
 
 <em>© Powered by PLAY-Z HACKING</em>"""
-    context.bot.send_photo(chat_id=uid, photo=image, caption=caption, parse_mode="HTML",
-                           reply_markup=InlineKeyboardMarkup(keyboard))
+    context.bot.send_photo(chat_id=uid, photo=image, caption=caption, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 def button_handler(update: Update, context: CallbackContext):
     query = update.callback_query
@@ -111,12 +111,22 @@ def button_handler(update: Update, context: CallbackContext):
 
     if data == "host_py":
         query.message.reply_text("📁 Send a .py file to run.")
+    elif data == "deploy_github":
+        query.message.reply_text("📎 Send a GitHub repo link.")
+    elif data == "deploy_zip":
+        query.message.reply_text("🗜 Send a .zip file.")
     elif data == "my_projects":
-        files = list(user_projects.get(uid, {}).keys())
+        files = user_projects.get(uid, {})
         if not files:
             return query.message.reply_text("❌ No active projects.")
         buttons = [[InlineKeyboardButton(f"❌ {f}", callback_data=f"terminate_{f}")] for f in files]
         query.message.reply_text("📁 Active projects:", reply_markup=InlineKeyboardMarkup(buttons))
+    elif data == "terminate_one":
+        files = user_projects.get(uid, {})
+        if not files:
+            return query.message.reply_text("❌ No active projects.")
+        buttons = [[InlineKeyboardButton(f"🛠 Stop {f}", callback_data=f"terminate_{f}")] for f in files]
+        query.message.reply_text("🛠 Select project to terminate:", reply_markup=InlineKeyboardMarkup(buttons))
     elif data == "terminate_all":
         if uid != ADMIN_ID:
             return query.answer("❌ Only admin can use this.")
@@ -124,7 +134,7 @@ def button_handler(update: Update, context: CallbackContext):
             for process in uid_projects.values():
                 process.kill()
         user_projects.clear()
-        query.message.reply_text("🧨 All processes terminated by admin.")
+        query.message.reply_text("🧨 All sessions terminated by admin.")
     elif data == "my_plan":
         now = datetime.now(timezone("Asia/Kolkata")).strftime("%Y-%m-%d %H:%M:%S")
         expiry = premium_users.get(str(uid))
@@ -142,12 +152,18 @@ def button_handler(update: Update, context: CallbackContext):
         query.message.reply_text(text, parse_mode="HTML")
     elif data.startswith("terminate_"):
         filename = data.split("terminate_")[1]
-        stop_project(uid, filename)
+        stop_project(uid, filename, context.bot)
         query.message.reply_text(f"✅ Project <b>{filename}</b> terminated.", parse_mode="HTML")
+    elif data.startswith("restart_"):
+        filename = data.split("restart_")[1]
+        path = os.path.join(BASE_DIR, filename)
+        if os.path.exists(path):
+            run_command(uid, f"python3 '{path}'", filename, update, context)
+        else:
+            query.message.reply_text("❌ File not found.")
     elif data.startswith("log_"):
         filename = data.split("log_")[1]
-        session_id = f"{uid}_{filename}".replace(" ", "_")
-        logpath = os.path.join(LOG_DIR, f"{session_id}.txt")
+        logpath = os.path.join(LOG_DIR, f"{uid}_{filename}.txt")
         if os.path.exists(logpath):
             with open(logpath, "rb") as f:
                 context.bot.send_document(chat_id=uid, document=f, filename=f"{filename}.log")
@@ -163,11 +179,10 @@ def handle_file(update: Update, context: CallbackContext):
     if file.file_size > MAX_FILE_SIZE:
         return update.message.reply_text("❌ File too large. Max 50MB allowed.")
 
-    filename = f"{uid}_{file.file_name}"
+    filename = file.file_name
     path = os.path.join(BASE_DIR, filename)
     file.get_file().download(path)
-
-    run_command(uid, f"python3 '{path}'", file.file_name, update, context)
+    run_command(uid, f"python3 '{path}'", filename, update, context)
 
 def add_premium(update: Update, context: CallbackContext):
     if update.effective_user.id != ADMIN_ID:
@@ -185,25 +200,19 @@ def add_premium(update: Update, context: CallbackContext):
 def main():
     updater = Updater(BOT_TOKEN, use_context=True)
     dp = updater.dispatcher
-
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("add", add_premium, pass_args=True))
     dp.add_handler(CallbackQueryHandler(button_handler))
     dp.add_handler(MessageHandler(Filters.document.mime_type("text/x-python"), handle_file))
-
     updater.start_polling()
     updater.idle()
 
-# Flask to keep Koyeb alive
+# Flask server to keep alive on Koyeb
 app = Flask(__name__)
-
 @app.route('/')
 def index():
-    return "Bot is alive!", 200
-
-def flask_thread():
-    app.run(host="0.0.0.0", port=8000)
+    return "Bot is running", 200
 
 if __name__ == "__main__":
-    threading.Thread(target=flask_thread).start()
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=8000)).start()
     main()
