@@ -340,5 +340,21 @@ def main():
     updater.start_polling()
     updater.idle()
 
+# ... (baaki pura bot ka code same rahega)
+
+from flask import Flask
+import threading
+
+# Flask app to keep Koyeb Web Service happy
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return "Bot is running!", 200
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8000)
+
 if __name__ == "__main__":
+    threading.Thread(target=run_flask).start()
     main()
