@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone as dt_timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 from pytz import timezone
 
-BOT_TOKEN = "7659870883:AAHIHWRgYVx7uvj5D5H_pe-t2nPKkPLBZxw"
+BOT_TOKEN = "7659870883:AAGiG3ActkFCD2LmQ8l1b63_CJrPs-c7Ld0"
 ADMIN_ID = 7107162691
 
 BASE_DIR = "projects"
